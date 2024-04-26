@@ -1,6 +1,6 @@
 #!/bin/bash
 
-topic=/world/myworld/pose/info
+topic=$1
 echo "Creating meta information on objects from the simulator"
 echo "Using topic name: $topic"
 echo "Please count 3 and press control + C"

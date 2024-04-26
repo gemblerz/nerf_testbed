@@ -17,7 +17,6 @@ def build_command(topic_name):
 
 
 def worker_function(topic_name, output_dir):
-    
     output_filename = f'{os.path.basename(topic_name)}.bag'
     full_path = os.path.join(output_dir, output_filename)
     logging.info(f'Dumping messages for topic {topic_name} at {full_path}')
