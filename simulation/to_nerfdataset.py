@@ -180,7 +180,7 @@ if __name__ == "__main__":
         action="store",
         help="Path to output directory ")
     parser.add_argument(
-        "-i", "--input_dir",
+        "-i", "--input-dir",
         dest="input_dir", required=True,
         action="store",
         help="Path to input bag files")
