@@ -7,13 +7,13 @@ from multiprocessing import Process
 
 def build_command(topic_name):
     return [
-    "gz",
-    "topic",
-    "--echo",
-    "--json-output",
-    "--topic",
-    topic_name,
-]
+        "gz",
+        "topic",
+        "--echo",
+        "--json-output",
+        "--topic",
+        topic_name,
+    ]
 
 
 def worker_function(topic_name, output_dir):

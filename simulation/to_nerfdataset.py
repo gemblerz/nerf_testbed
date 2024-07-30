@@ -68,13 +68,18 @@ def generate_matrix_for_nerfstudio(P: dict, O: dict) -> np.ndarray:
     # [+X2 +Y2 +Z2 Z]
     # [0.0 0.0 0.0 1]
     pos = np.array([[P["x"], P["y"], P["z"]]], dtype=float).T
+    # pos = pos / 10
     rot = R.from_quat(
         [O["x"], O["y"], O["z"], O["w"]]
         )
-    logging.debug(f'rotation in degrees for zyx: {rot.as_euler('zyx', degrees=True)}')
-    pos_rot = np.hstack((rot.as_matrix(), pos))
-    logging.debug(f'rotation and transformation: {pos_rot}')
-    return np.vstack((pos_rot, np.array([0., 0., 0., 1.], dtype=float)))
+    # Custom transformation for Gazebo in NerfStudio
+    pX = R.from_euler('x', 90, degrees=True)
+    pY = R.from_euler('y', 180, degrees=True)
+    pZ = R.from_euler('z', 90, degrees=True)
+    rot2 = pX.apply(pY.apply(pZ.apply(rot.as_matrix())))
+    pos_rot = np.hstack((rot2, pos))
+
+    return np.vstack((np.round(pos_rot, 6), np.array([0., 0., 0., 1.], dtype=float)))
 
 
 def load_camera_extrinsics_from_bag(p: Path) -> dict:
