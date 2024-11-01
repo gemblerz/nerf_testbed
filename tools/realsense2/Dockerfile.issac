@@ -1,0 +1,11 @@
+FROM nvcr.io/nvidia/isaac/ros:aarch64-ros2_humble_5d698e0d23e98e2567b1c9b70abd0c1f 
+
+RUN apt-get update \
+  && apt-get install -y \
+  ros-humble-librealsense2*
+
+RUN apt-get update \
+  && apt-get install -y \
+  ros-humble-realsense2-* \
+  ros-humble-isaac-ros-examples \
+  ros-humble-isaac-ros-realsense
