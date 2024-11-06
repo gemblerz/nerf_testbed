@@ -11,4 +11,9 @@ RUN apt-get install -y \
   ros-humble-realsense2-* \
   ros-humble-rviz2
 
+# NOTE: Running ROS with root prohibits non-root users
+#     to subscribe topics
+RUN useradd -m -u 1000 ros
+USER ros
+
 ENTRYPOINT ["/ros_entrypoint.sh"]
