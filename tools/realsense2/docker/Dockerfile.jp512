@@ -1,0 +1,20 @@
+# For Jetpack 5.1.2
+FROM nvcr.io/nvidia/isaac/ros:aarch64-ros2_humble_42f50fd45227c63eb74af1d69ddc2970
+
+RUN apt-get update \
+  && apt-get install -y \
+  usbutils \
+  nano \
+  cuda \
+  ros-humble-librealsense2*
+
+RUN apt-get update \
+  && apt-get install -y \
+  ros-humble-realsense2-* \
+  ros-humble-isaac-ros-visual-slam 
+  # ros-humble-isaac-ros-examples \
+  # ros-humble-isaac-ros-realsense
+
+COPY launch.sh /app/
+WORKDIR /app
+ENTRYPOINT ["/app/launch.sh"]

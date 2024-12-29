@@ -1,0 +1,48 @@
+# For Jetpack 6.1
+FROM nvcr.io/nvidia/isaac/ros:aarch64-ros2_humble_deaea1a392d5c02f76be3f4651f4b65a
+
+# For Jetpack 6.0
+# FROM nvcr.io/nvidia/isaac/ros:aarch64-ros2_humble_5d698e0d23e98e2567b1c9b70abd0c1f
+
+RUN apt-get update \
+  && apt-get install -y \
+  usbutils \
+  nano \
+  cuda \
+  && echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+
+# As of now Jetpack 6.x kernel does not recognize Intel realsense's IMU as an HID device.
+# Intel realsense SDK should be compiled with libuvc to resolve the issue.
+# For more information,
+# https://github.com/intelRealSense/librealsense/blob/master/doc/installation_jetson.md
+# -DBUILD_WITH_CUDA flag is also added to enable CUDA support
+# make -j8 is added for any device with more than 8 cores
+ADD https://raw.githubusercontent.com/IntelRealSense/librealsense/refs/heads/master/scripts/libuvc_installation.sh /app/libuvc_installation.sh
+RUN cd /app/ \
+  && sed -i 's/-DFORCE_LIBUVC=true/-DFORCE_LIBUVC=true -DBUILD_WITH_CUDA=true/' libuvc_installation.sh \
+  && sed -i 's/make -j2/make -j8/' libuvc_installation.sh \
+  && chmod +x libuvc_installation.sh \
+  && ./libuvc_installation.sh \
+  && rm -rf ~/librealsense_build
+
+# Intel realsense ROS packages, ros-humble-librealsense2 and ros-humble-realsense2-*,
+# need to be compiled from source in order to use the SDK compiled above.
+# FYI, the pre-built packages will install librealsense2 and realsense2-* from apt.
+# TODO: the realsense-ros GitHub will need to be pinned to a specific commit.
+RUN mkdir -p /app/ros2_ws/src \
+  && cd /app/ros2_ws/src \
+  && git clone https://github.com/IntelRealSense/realsense-ros.git -b ros2-master \
+  && cd /app/ros2_ws/ \
+  && source ~/.bashrc \
+  && rosdep update \
+  && rosdep install -i --from-path src --rosdistro humble --skip-keys=librealsense2 -y \
+  && colcon build --symlink-install \
+  && echo "source /app/ros2_ws/install/local_setup.bash" >> ~/.bashrc
+
+RUN apt-get update \
+  && apt-get install -y \
+  ros-humble-isaac-ros-visual-slam
+
+COPY launch.sh /app/
+WORKDIR /app
+ENTRYPOINT ["/app/launch.sh"]
