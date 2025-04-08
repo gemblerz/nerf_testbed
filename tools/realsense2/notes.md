@@ -80,3 +80,60 @@ root@ea09038091ee:/opt/ros/humble/share/isaac_ros_visual_slam/launch# cat isaac_
         ],
 ...
 ```
+
+## Run
+```bash
+docker run -ti --rm \
+  --runtime nvidia \
+  --privileged \
+  --network host \
+  --entrypoint /bin/bash \
+  gemblerz/ros-isaac-realsense2:humble-jp61
+```
+
+Then, inside the container
+```bash
+source /opt/ros/humble/setup.bash
+source /app/ros2_ws/install/local_setup.bash
+ros2 launch mylaunch.py
+```
+
+Or,
+```bash
+docker run -d \
+  --name vslam \
+  --runtime nvidia \
+  --privileged \
+  --network host \
+  -v /dev/shm:/dev/shm \
+  gemblerz/ros-isaac-realsense2:humble-jp61
+```
+
+> "--network host" implies that participants use sharedmemory for faster message transport (See more in the [post](https://stackoverflow.com/questions/65900201/troubles-communicating-with-ros2-node-in-docker-container))
+
+## Record
+
+First, run a container with a storage mounted for saving,
+```bash
+docker run -ti --rm \
+  --network host \
+  --runtime nvidia \
+  -v /dev/shm:/dev/shm \
+  --volume /media/plugin-data/bags:/data \
+  --entrypoint /bin/bash \
+  gemblerz/ros-isaac-realsense2:humble-jp61
+```
+
+```bash
+source /opt/ros/humble/setup.bash
+source /app/ros2_ws/install/local_setup.bash
+ros2 bag record -o test \
+  /tf \
+  /tf_static \
+  /camera/color/camera_info \
+  /camera/color/image_raw/compressed \
+  /camera/aligned_depth_to_color/image_raw \
+  /visual_slam/tracking/odometry
+```
+
+> The "/camera/color/camera_info" topic includes intrinsic parameters of the camera. This will be required when using the data in Nerf.

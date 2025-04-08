@@ -1,0 +1,22 @@
+# https://catalog.ngc.nvidia.com/orgs/nvidia/teams/isaac/containers/ros/tags
+FROM nvcr.io/nvidia/isaac/ros:x86_64-ros2_humble_b0d3ce146e1d446847f5ab373398eff7
+
+RUN apt-get update \
+  && apt-get install -y \
+  ros-humble-librealsense2* \
+  wget \
+  curl \
+  nano
+
+RUN apt-get install -y \
+  ros-humble-realsense2-* \
+  ros-humble-isaac-ros-visual-slam 
+
+# NOTE: Running ROS with root prohibits non-root users
+#     to subscribe topics
+RUN useradd -m -u 1000 ros
+USER ros
+
+COPY launch.sh /app/
+WORKDIR /app
+ENTRYPOINT ["/app/launch.sh"]
