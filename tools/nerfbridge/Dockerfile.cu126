@@ -1,0 +1,51 @@
+FROM gemblerz/nerfstudio:v1.1.0-cu126-cuarc75
+
+# RUN locale \
+#   && apt update && apt install locales \
+#   && locale-gen en_US en_US.UTF-8 \
+#   && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+#   && echo "export LANG=en_US.UTF-8" \
+#   && locale
+
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y software-properties-common curl tzdata python3-pip \
+  && add-apt-repository universe
+
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+RUN apt-get update \
+  && apt-get install -y ros-humble-ros-base ros-dev-tools
+# RUN echo -e '\nsource /opt/ros/humble/setup.bash' >> /home/user/.bashrc
+
+WORKDIR /code
+
+# NOTE: in Ubuntu 22.04 cvbridge3 seems to be for ROS1 only.
+#  cv-bridge seems to be the right package.
+# $ pip3 show cvbridge3
+# Name: cvbridge3
+# Version: 1.1
+# Summary: Python 3 Port of ROS 1.0 cv_bridge.
+# Home-page: UNKNOWN
+# Author: Rahul Bhadani
+# Author-email: rahulbhadani@email.arizona.edu
+# License: UNKNOWN
+# Location: /usr/local/lib/python3.10/dist-packages
+# Requires: 
+# Required-by:
+# 
+# $ pip3 show cv-bridge
+# Name: cv-bridge
+# Version: 1.13.0.post0
+# Summary: This contains CvBridge, which converts between ROS
+#     Image messages and OpenCV images.
+# Home-page: http://www.ros.org/wiki/cv_bridge
+# Author: Patrick Mihelich, James Bowman
+# Author-email: 
+# License: BSD
+# Location: /usr/local/lib/python3.10/dist-packages
+# Requires: 
+# Required-by: 
+RUN git clone https://github.com/javieryu/nerf_bridge.git && cd nerf_bridge \
+  && pip3 install -U pip setuptools cv-bridge \
+  && pip3 install -e .
