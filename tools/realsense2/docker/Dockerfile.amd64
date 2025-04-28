@@ -5,7 +5,8 @@ RUN apt-get update \
   ros-humble-librealsense2* \
   wget \
   curl \
-  nano
+  nano \
+  dumb-init
 
 RUN apt-get install -y \
   ros-humble-realsense2-* \

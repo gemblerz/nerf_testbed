@@ -6,6 +6,7 @@ RUN apt-get update \
   usbutils \
   nano \
   cuda \
+  dumb-init \
   ros-humble-librealsense2*
 
 RUN apt-get update \
@@ -17,4 +18,5 @@ RUN apt-get update \
 
 COPY launch.sh /app/
 WORKDIR /app
-ENTRYPOINT ["/app/launch.sh"]
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+CMD ["/app/launch.sh", "--with", "--args"]

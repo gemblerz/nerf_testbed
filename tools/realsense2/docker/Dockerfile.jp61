@@ -9,6 +9,7 @@ RUN apt-get update \
   usbutils \
   nano \
   cuda \
+  dumb-init \
   && echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 
 # As of now Jetpack 6.x kernel does not recognize Intel realsense's IMU as an HID device.

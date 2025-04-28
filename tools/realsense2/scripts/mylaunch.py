@@ -32,15 +32,14 @@ def generate_launch_description():
             'enable_infra2': True,
             'enable_color': True,
             'enable_depth': True,
-            'align_depth.enable': True,
             'depth_module.emitter_enabled': 0,
-            'depth_module.profile': '1280x720x30',
+            'depth_module.profile': '640x360x30',
             'enable_gyro': True,
             'enable_accel': True,
             'gyro_fps': 200,
             'accel_fps': 200,
             'unite_imu_method': 2
-        }],
+        }]
     )
 
     visual_slam_node = ComposableNode(
