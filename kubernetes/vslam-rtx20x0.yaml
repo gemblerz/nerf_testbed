@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: vslam-nx512
+  name: vslam-rtx20x0
 spec:
   nodeSelector:
-    kubernetes.io/hostname: nx512
+    kubernetes.io/hostname: rtx2080
   # hostNetwork: true
   containers:
-  - name: vslam-nx512
-    image: gemblerz/ros-isaac-realsense2:2.1.0-humble-jp512
+  - name: vslam-rtx20x0
+    image: gemblerz/ros-isaac-realsense2:2.1.0-humble-amd64-cuda
     command: ["/bin/bash"]
     args:
     - -c
@@ -22,11 +22,11 @@ spec:
       requests:
         cpu: 2
         memory: 1Gi
-  #   volumeMounts:
-  #   - mountPath: /dev
-  #     name: host-dev
-  # volumes:
-  # - name: host-dev
-  #   hostPath:
-  #     path: /dev
-  #     type: Directory
+    volumeMounts:
+    - mountPath: /dev
+      name: host-dev
+  volumes:
+  - name: host-dev
+    hostPath:
+      path: /dev
+      type: Directory
