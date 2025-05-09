@@ -5,7 +5,7 @@ metadata:
 spec:
   nodeSelector:
     kubernetes.io/hostname: orin61
-  hostNetwork: true
+  # hostNetwork: true
   containers:
   - name: vslam-orin61
     image: gemblerz/ros-isaac-realsense2:2.1.0-humble-jp61
@@ -17,10 +17,10 @@ spec:
       privileged: true
     resources:
       limits:
-        cpu: 4
+        cpu: 4000m
         memory: 3Gi
       requests:
-        cpu: 2
+        cpu: 2000m
         memory: 1Gi
     volumeMounts:
     - mountPath: /dev

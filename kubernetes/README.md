@@ -51,6 +51,7 @@ curl -sfL https://get.k3s.io | \
 ```
 
 # Desktop with RTX2080
+```bash
 curl -sfL https://get.k3s.io | \
   K3S_URL=https://10.31.82.1:6443 \
   K3S_TOKEN=myagent \

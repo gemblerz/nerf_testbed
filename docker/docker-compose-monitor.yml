@@ -1,0 +1,36 @@
+version: "3.9"
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    restart: always
+    user: root # Run as root to access Docker socket
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.role=manager
+    network_mode: host
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/data
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+  grafana:
+    image: grafana/grafana:latest
+    restart: always
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.role=manager
+    network_mode: host
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+volumes:
+  prometheus_data:
+  grafana_data:

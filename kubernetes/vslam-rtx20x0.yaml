@@ -8,7 +8,7 @@ spec:
   # hostNetwork: true
   containers:
   - name: vslam-rtx20x0
-    image: gemblerz/ros-isaac-realsense2:2.1.0-humble-amd64-cuda
+    image: gemblerz/ros-isaac-realsense2:3.2.0-humble-amd64-cuda
     command: ["/bin/bash"]
     args:
     - -c
@@ -17,10 +17,10 @@ spec:
       privileged: true
     resources:
       limits:
-        cpu: 4
+        cpu: 4000m
         memory: 3Gi
       requests:
-        cpu: 2
+        cpu: 2000m
         memory: 1Gi
     volumeMounts:
     - mountPath: /dev
