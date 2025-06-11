@@ -6,11 +6,15 @@ RUN apt-get update \
   wget \
   curl \
   nano \
-  dumb-init
+  dumb-init \
+  python3-pip
 
 RUN apt-get install -y \
   ros-humble-realsense2-* \
   ros-humble-rviz2
+
+RUN pip3 install -U pip \
+  && pip install rclpy
 
 # NOTE: Running ROS with root prohibits non-root users
 #     to subscribe topics
