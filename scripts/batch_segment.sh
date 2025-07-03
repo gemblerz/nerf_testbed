@@ -2,7 +2,7 @@
 
 # Image Segmentation Batch Processing Script
 # This script finds all JPG files in a directory or processes a single image file
-# using the CLIPSeg API, then replaces the original images with the masked results.
+# using the CLIPSeg API, then saves the masked results as PNG files and deletes the original JPG files.
 
 set -e  # Exit on any error
 
@@ -16,12 +16,13 @@ DRY_RUN=false
 usage() {
     echo "Usage: $0 [OPTIONS] INPUT"
     echo ""
-    echo "Process JPG files with image segmentation"
+    echo "Process JPG files with image segmentation and save results as PNG files"
     echo ""
     echo "INPUT can be:"
     echo "  - A single image file (jpg/jpeg)"
     echo "  - A directory containing images (processes all jpg/jpeg files recursively)"
     echo ""
+    echo "Note: The script will save segmented results as PNG files and delete the original JPG files."
     echo "Options:"
     echo "  -t, --target TEXT    Target object to segment (default: '$TARGET_OBJECT')"
     echo "  -u, --url URL        API server URL (default: $API_URL)"
@@ -86,12 +87,16 @@ is_image_file() {
 process_image() {
     local image_path="$1"
     local image_name=$(basename "$image_path")
-    local temp_output="/tmp/segmented_${image_name}_$$"
+    local image_name_no_ext="${image_name%.*}"
+    local image_dir=$(dirname "$image_path")
+    local output_path="${image_dir}/${image_name_no_ext}.png"
+    local temp_output="/tmp/segmented_${image_name_no_ext}_$$.png"
     
     log "Processing: $image_path"
     
     if [ "$DRY_RUN" = true ]; then
         log_info "DRY RUN: Would process $image_path with target '$TARGET_OBJECT'"
+        log_info "DRY RUN: Would save PNG result to $output_path and delete original JPG"
         return 0
     fi
     
@@ -105,12 +110,18 @@ process_image() {
         
         # Check if we got a valid response (non-empty file)
         if [ -s "$temp_output" ]; then
-            # Replace original image with the segmented result
-            if mv "$temp_output" "$image_path"; then
-                log_info "Successfully processed: $image_path"
-                return 0
+            # Move the PNG result to the final location
+            if mv "$temp_output" "$output_path"; then
+                # Delete the original JPG file
+                if rm "$image_path"; then
+                    log_info "Successfully processed: $image_path -> $output_path"
+                    return 0
+                else
+                    log_error "Failed to delete original file: $image_path"
+                    return 1
+                fi
             else
-                log_error "Failed to replace original file: $image_path"
+                log_error "Failed to save PNG result: $output_path"
                 rm -f "$temp_output"
                 return 1
             fi

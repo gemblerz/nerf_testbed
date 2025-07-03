@@ -27,22 +27,25 @@ logger = logging.getLogger(__name__)
 class ImageSegmentationHandler(BaseHTTPRequestHandler):
     """HTTP request handler for image segmentation"""
     
+    # Class-level variables to store the model (shared across all instances)
+    _processor = None
+    _model = None
+    _device = "cuda" if torch.cuda.is_available() else "cpu"
+    _model_loaded = False
+    
     def __init__(self, *args, **kwargs):
-        # Initialize the segmentation model
-        self.processor = None
-        self.model = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Using device: {self.device}")
         super().__init__(*args, **kwargs)
     
-    def _load_model(self):
-        """Load the CLIPSeg model for image segmentation"""
-        if self.processor is None or self.model is None:
-            logger.info("Loading CLIPSeg model...")
+    @classmethod
+    def _load_model(cls):
+        """Load the CLIPSeg model for image segmentation (class method)"""
+        if not cls._model_loaded:
+            logger.info(f"Loading CLIPSeg model on device: {cls._device}")
             try:
-                self.processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
-                self.model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
-                self.model.to(self.device)
+                cls._processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
+                cls._model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
+                cls._model.to(cls._device)
+                cls._model_loaded = True
                 logger.info("Model loaded successfully")
             except Exception as e:
                 logger.error(f"Failed to load model: {e}")
@@ -64,16 +67,16 @@ class ImageSegmentationHandler(BaseHTTPRequestHandler):
             self._load_model()
             
             # Prepare inputs
-            inputs = self.processor(
+            inputs = self._processor(
                 text=[target_text], 
                 images=[image], 
                 padding="max_length", 
                 return_tensors="pt"
-            ).to(self.device)
+            ).to(self._device)
             
             # Generate segmentation mask
             with torch.no_grad():
-                outputs = self.model(**inputs)
+                outputs = self._model(**inputs)
                 logits = outputs.logits
                 
             # Process the logits to create a mask
@@ -229,6 +232,10 @@ class ImageSegmentationHandler(BaseHTTPRequestHandler):
 def run_server(host='0.0.0.0', port=8000):
     """Run the HTTP server"""
     logger.info(f"Starting Image Segmentation Server on {host}:{port}")
+    
+    # Load the model once at startup
+    logger.info("Loading model at startup...")
+    ImageSegmentationHandler._load_model()
     
     server_address = (host, port)
     httpd = HTTPServer(server_address, ImageSegmentationHandler)
