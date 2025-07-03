@@ -5,7 +5,7 @@ ARG NVIDIA_CUDA_VERSION=12.6.0
 # ARG CUDA_ARCHITECTURES="90;89;86;80;75;70;61"
 # CUDA architecture 75 is for 20X0 GPUs.
 ARG CUDA_ARCHITECTURES="75"
-ARG NERFSTUDIO_VERSION="v1.1.0"
+ARG NERFSTUDIO_VERSION="v1.1.5"
 
 # Pull source either provided or from git.
 FROM scratch as source_copy
