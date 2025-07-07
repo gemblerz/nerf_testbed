@@ -1,0 +1,4 @@
+# Requirements for PLY visualization
+open3d>=0.17.0
+numpy>=1.21.0
+matplotlib>=3.5.0
