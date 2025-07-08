@@ -231,15 +231,32 @@ class PLYViewer:
         print(f"Matplotlib visualization saved: {plot_path}")
         return plot_path
 
-    def web_export(self, pcd, file_path):
+    def web_export(self, pcd, file_path, max_points=None):
         """Export point cloud as HTML for web viewing."""
         points = np.asarray(pcd.points)
+        original_count = len(points)
         
-        # Subsample if too large
-        if len(points) > 25000:  # Reduced for better performance
-            indices = np.random.choice(len(points), 25000, replace=False)
+        # Determine max points - use parameter, or smart defaults based on size
+        if max_points is None:
+            if original_count <= 50000:
+                max_points = original_count  # Keep all points for smaller clouds
+            elif original_count <= 200000:
+                max_points = 100000  # Medium clouds: use 100k points
+            elif original_count <= 500000:
+                max_points = 200000  # Large clouds: use 200k points
+            else:
+                max_points = 300000  # Very large clouds: use 300k points
+        elif max_points <= 0:
+            max_points = original_count  # Use all points when explicitly set to 0 or negative
+        
+        # Subsample if needed
+        if len(points) > max_points:
+            indices = np.random.choice(len(points), max_points, replace=False)
             points = points[indices]
-            print(f"Subsampled to 25,000 points for web export")
+            print(f"Subsampled from {original_count:,} to {max_points:,} points for web export")
+        else:
+            print(f"Using all {original_count:,} points for web export")
+            indices = None
         
         # Get colors
         if pcd.has_colors():
@@ -284,7 +301,7 @@ class PLYViewer:
             <h2>{Path(file_path).name}</h2>
             <div class="stats">
                 <div class="stat">
-                    <strong>Points:</strong><br>{len(points):,}
+                    <strong>Points:</strong><br>{len(points):,}{f' of {original_count:,}' if len(points) != original_count else ''}
                 </div>
                 <div class="stat">
                     <strong>X Range:</strong><br>{min_bounds[0]:.3f} to {max_bounds[0]:.3f}
@@ -297,10 +314,12 @@ class PLYViewer:
                 </div>
             </div>
             <div class="controls">
-                <strong>Controls:</strong> Left click + drag to rotate | Right click + drag to pan | Scroll to zoom | Press 'R' to reset view | '+/-' to change point size<br>
+                <strong>Mouse Controls:</strong> Left click + drag to rotate freely in 3D | Right click + drag to pan | Scroll to zoom | Middle click + drag for constrained rotation<br>
+                <strong>Keyboard:</strong> 'R' to reset view | '+/-' to change point size | Arrow keys for fine rotation | Shift+arrows for panning | 1,2,3,7 for preset views<br>
                 <strong>Point Size:</strong> <input type="range" id="pointSize" min="0.01" max="10" step="0.01" value="0.05"> 
                 <span id="pointSizeValue">0.05</span> | 
-                <button onclick="resetPointSize()">Reset Size</button>
+                <button onclick="resetPointSize()">Reset Size</button> | 
+                <button onclick="resetCamera()">Reset View</button>
             </div>
             <div class="debug" id="debug">Initializing...</div>
             <div class="error" id="error" style="display: none;"></div>
@@ -372,40 +391,79 @@ class PLYViewer:
             
             log('Geometry created with ' + positions.length/3 + ' vertices');
             
-            // Create material
+            // Create enhanced material for better rendering
             const material = new THREE.PointsMaterial({{
                 size: 0.05,
                 vertexColors: true,
-                sizeAttenuation: false
+                sizeAttenuation: false,
+                alphaTest: 0.5,
+                transparent: false
             }});
             
             // Create point cloud
             const pointCloud = new THREE.Points(geometry, material);
             scene.add(pointCloud);
             
-            log('Point cloud added to scene');
+            log('Point cloud added to scene with enhanced material');
             
-            // Set up camera
+            // Set up camera with better initial positioning
             const center = new THREE.Vector3({center[0]:.4f}, {center[1]:.4f}, {center[2]:.4f});
             const maxDim = {max_dim:.4f};
             
+            // Position camera at a good initial angle for 3D viewing
+            const distance = maxDim * 2.0;
             camera.position.set(
-                center.x + maxDim * 1.5,
-                center.y + maxDim * 1.5,
-                center.z + maxDim * 1.5
+                center.x + distance * 0.7,
+                center.y + distance * 0.7,
+                center.z + distance * 0.7
             );
             camera.lookAt(center);
             
+            // Set appropriate near/far planes for the point cloud scale
+            camera.near = maxDim * 0.01;
+            camera.far = maxDim * 20;
+            camera.updateProjectionMatrix();
+            
             log('Camera positioned at: ' + camera.position.x.toFixed(3) + ', ' + camera.position.y.toFixed(3) + ', ' + camera.position.z.toFixed(3));
             
-            // Add controls
+            // Add enhanced controls
             const controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.target.copy(center);
+            
+            // Enhanced control settings for better 3D manipulation
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false; // Keep panning in world space
+            
+            // Enable full rotation freedom
+            controls.minAzimuthAngle = -Infinity; // No limit on horizontal rotation
+            controls.maxAzimuthAngle = Infinity;
+            controls.minPolarAngle = 0; // Allow full vertical rotation
+            controls.maxPolarAngle = Math.PI;
+            
+            // Enhanced zoom and distance controls
+            controls.minDistance = maxDim * 0.1;
+            controls.maxDistance = maxDim * 10;
+            controls.zoomSpeed = 1.0;
+            controls.rotateSpeed = 1.0;
+            controls.panSpeed = 0.8;
+            
+            // Enable all mouse buttons
+            controls.mouseButtons = {{
+                LEFT: THREE.MOUSE.ROTATE,
+                MIDDLE: THREE.MOUSE.DOLLY,
+                RIGHT: THREE.MOUSE.PAN
+            }};
+            
+            // Enable touch controls for mobile
+            controls.touches = {{
+                ONE: THREE.TOUCH.ROTATE,
+                TWO: THREE.TOUCH.DOLLY_PAN
+            }};
+            
             controls.update();
             
-            log('Orbit controls initialized');
+            log('Enhanced orbit controls initialized with full 3D rotation');
             
             // Add lighting
             const ambientLight = new THREE.AmbientLight(0x404040, 0.8);
@@ -449,18 +507,75 @@ class PLYViewer:
                 renderer.setSize(container.clientWidth, container.clientHeight);
             }});
             
-            // Keyboard controls
+            // Enhanced keyboard controls
             window.addEventListener('keydown', (event) => {{
+                const moveSpeed = maxDim * 0.1;
+                const rotateSpeed = 0.1;
+                
+                // Reset camera
                 if (event.key === 'r' || event.key === 'R') {{
+                    const distance = maxDim * 2.0;
                     camera.position.set(
-                        center.x + maxDim * 1.5,
-                        center.y + maxDim * 1.5,
-                        center.z + maxDim * 1.5
+                        center.x + distance * 0.7,
+                        center.y + distance * 0.7,
+                        center.z + distance * 0.7
                     );
                     camera.lookAt(center);
                     controls.target.copy(center);
                     controls.update();
                     log('Camera reset to initial position');
+                }}
+                
+                // Arrow keys for fine rotation
+                if (event.shiftKey) {{
+                    // Shift + arrows for panning
+                    if (event.key === 'ArrowLeft') {{
+                        controls.target.x -= moveSpeed;
+                        camera.position.x -= moveSpeed;
+                    }} else if (event.key === 'ArrowRight') {{
+                        controls.target.x += moveSpeed;
+                        camera.position.x += moveSpeed;
+                    }} else if (event.key === 'ArrowUp') {{
+                        controls.target.y += moveSpeed;
+                        camera.position.y += moveSpeed;
+                    }} else if (event.key === 'ArrowDown') {{
+                        controls.target.y -= moveSpeed;
+                        camera.position.y -= moveSpeed;
+                    }}
+                    controls.update();
+                    event.preventDefault();
+                }} else {{
+                    // Arrow keys for rotation
+                    if (event.key === 'ArrowLeft') {{
+                        const spherical = new THREE.Spherical();
+                        spherical.setFromVector3(camera.position.clone().sub(controls.target));
+                        spherical.theta -= rotateSpeed;
+                        camera.position.copy(new THREE.Vector3().setFromSpherical(spherical).add(controls.target));
+                        camera.lookAt(controls.target);
+                        event.preventDefault();
+                    }} else if (event.key === 'ArrowRight') {{
+                        const spherical = new THREE.Spherical();
+                        spherical.setFromVector3(camera.position.clone().sub(controls.target));
+                        spherical.theta += rotateSpeed;
+                        camera.position.copy(new THREE.Vector3().setFromSpherical(spherical).add(controls.target));
+                        camera.lookAt(controls.target);
+                        event.preventDefault();
+                    }} else if (event.key === 'ArrowUp') {{
+                        const spherical = new THREE.Spherical();
+                        spherical.setFromVector3(camera.position.clone().sub(controls.target));
+                        spherical.phi = Math.max(0.1, spherical.phi - rotateSpeed);
+                        camera.position.copy(new THREE.Vector3().setFromSpherical(spherical).add(controls.target));
+                        camera.lookAt(controls.target);
+                        event.preventDefault();
+                    }} else if (event.key === 'ArrowDown') {{
+                        const spherical = new THREE.Spherical();
+                        spherical.setFromVector3(camera.position.clone().sub(controls.target));
+                        spherical.phi = Math.min(Math.PI - 0.1, spherical.phi + rotateSpeed);
+                        camera.position.copy(new THREE.Vector3().setFromSpherical(spherical).add(controls.target));
+                        camera.lookAt(controls.target);
+                        event.preventDefault();
+                    }}
+                    controls.update();
                 }}
                 
                 // Point size keyboard shortcuts
@@ -482,6 +597,42 @@ class PLYViewer:
                     pointSizeValue.textContent = newSize.toFixed(2);
                     log('Point size decreased to: ' + newSize.toFixed(2));
                     event.preventDefault();
+                }}
+                
+                // Additional view presets
+                if (event.key === '1') {{
+                    // Front view
+                    camera.position.set(center.x, center.y, center.z + maxDim * 2);
+                    camera.lookAt(center);
+                    controls.target.copy(center);
+                    controls.update();
+                    log('Switched to front view');
+                }} else if (event.key === '2') {{
+                    // Right view
+                    camera.position.set(center.x + maxDim * 2, center.y, center.z);
+                    camera.lookAt(center);
+                    controls.target.copy(center);
+                    controls.update();
+                    log('Switched to right view');
+                }} else if (event.key === '3') {{
+                    // Top view
+                    camera.position.set(center.x, center.y + maxDim * 2, center.z);
+                    camera.lookAt(center);
+                    controls.target.copy(center);
+                    controls.update();
+                    log('Switched to top view');
+                }} else if (event.key === '7') {{
+                    // Isometric view
+                    const distance = maxDim * 2.0;
+                    camera.position.set(
+                        center.x + distance * 0.7,
+                        center.y + distance * 0.7,
+                        center.z + distance * 0.7
+                    );
+                    camera.lookAt(center);
+                    controls.target.copy(center);
+                    controls.update();
+                    log('Switched to isometric view');
                 }}
             }});
             
@@ -507,7 +658,21 @@ class PLYViewer:
                 log('Point size reset to default: ' + defaultSize);
             }};
             
-            log('Point size controls initialized');
+            // Reset camera function
+            window.resetCamera = function() {{
+                const distance = maxDim * 2.0;
+                camera.position.set(
+                    center.x + distance * 0.7,
+                    center.y + distance * 0.7,
+                    center.z + distance * 0.7
+                );
+                camera.lookAt(center);
+                controls.target.copy(center);
+                controls.update();
+                log('Camera reset to initial position');
+            }};
+            
+            log('Point size and camera controls initialized');
             
         }} catch (err) {{
             error('Error initializing viewer: ' + err.message);
@@ -530,7 +695,7 @@ class PLYViewer:
         print(f"Open in VS Code and use 'Live Server' extension or copy to local machine")
         return html_path
 
-    def visualize_ply(self, file_path, enhance=True, mode="auto"):
+    def visualize_ply(self, file_path, enhance=True, mode="auto", max_points=None):
         """Visualize a PLY file with different modes for remote/local viewing."""
         try:
             pcd = self.load_ply_file(file_path)
@@ -543,6 +708,7 @@ class PLYViewer:
             print(f"  Min: {pcd.get_min_bound()}")
             print(f"  Max: {pcd.get_max_bound()}")
             print(f"  Center: {pcd.get_center()}")
+            print(f"  Total points: {len(pcd.points):,}")
             
             # Detect if we're in a remote environment
             is_remote = self.is_remote_environment()
@@ -588,7 +754,7 @@ class PLYViewer:
             elif mode == "web":
                 # Web export mode
                 print("Generating web export...")
-                html_path = self.web_export(pcd, file_path)
+                html_path = self.web_export(pcd, file_path, max_points=max_points)
                 print(f"Web export saved: {html_path}")
                 
             else:
@@ -643,7 +809,7 @@ class PLYViewer:
         
         return sample_files
     
-    def demo_mode(self):
+    def demo_mode(self, max_points=None):
         """Run demo mode with sample files from the workspace."""
         sample_files = self.find_sample_ply_files()
         
@@ -680,7 +846,7 @@ class PLYViewer:
                     mode_map = {"1": "auto", "2": "screenshot", "3": "matplotlib", "4": "web"}
                     mode = mode_map.get(mode_choice, "auto")
                     
-                    self.visualize_ply(str(sample_files[idx]), mode=mode)
+                    self.visualize_ply(str(sample_files[idx]), mode=mode, max_points=max_points)
                 else:
                     print("Invalid selection.")
                     
@@ -703,23 +869,29 @@ def main():
                        default="auto", help="Visualization mode")
     parser.add_argument("--no-enhance", action="store_true",
                        help="Skip enhancement (normals, colors)")
+    parser.add_argument("--max-points", type=int, 
+                       help="Maximum number of points to render (for web mode). Use 0 for all points.")
     
     args = parser.parse_args()
+    
+    # Handle max_points argument
+    max_points = args.max_points
+    # Don't convert 0 to None here - let the web_export method handle it
     
     viewer = PLYViewer()
     
     if args.demo:
-        viewer.demo_mode()
+        viewer.demo_mode(max_points=max_points)
     elif args.interactive:
         file_path = viewer.browse_file()
         if file_path:
-            viewer.visualize_ply(file_path, enhance=not args.no_enhance, mode=args.mode)
+            viewer.visualize_ply(file_path, enhance=not args.no_enhance, mode=args.mode, max_points=max_points)
         else:
             print("No file selected.")
     elif args.file:
         if not args.file.endswith('.ply'):
             print("Warning: File doesn't have .ply extension")
-        viewer.visualize_ply(args.file, enhance=not args.no_enhance, mode=args.mode)
+        viewer.visualize_ply(args.file, enhance=not args.no_enhance, mode=args.mode, max_points=max_points)
     else:
         print("PLY Point Cloud Viewer")
         print("Usage examples:")
@@ -728,6 +900,13 @@ def main():
         print("  python3 ply_viewer.py --interactive")
         print("  python3 ply_viewer.py --mode screenshot /path/to/file.ply")
         print("  python3 ply_viewer.py --mode web /path/to/file.ply")
+        print("  python3 ply_viewer.py --mode web --max-points 1000000 /path/to/file.ply  # Use 1M points")
+        print("  python3 ply_viewer.py --mode web --max-points 0 /path/to/file.ply  # Use ALL points")
+        print("")
+        print("Point control options:")
+        print("  --max-points 50000   # Use up to 50,000 points")
+        print("  --max-points 500000  # Use up to 500,000 points")
+        print("  --max-points 0       # Use ALL points (may be slow)")
         print("")
         print("For remote SSH environments, use:")
         print("  --mode screenshot  # Generate multiple view PNG files")
