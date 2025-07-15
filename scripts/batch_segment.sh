@@ -2,13 +2,28 @@
 
 # Image Segmentation Batch Processing Script
 # This script finds all JPG files in a directory or processes a single image file
-# using the CLIPSeg API, then saves the masked results as PNG files and deletes the original JPG files.
+# using either CLIPSeg (text-guided segmentation) or Rembg (background removal) APIs,
+# then saves the masked results as PNG files and deletes the original JPG files.
+#
+# Features:
+# - Support for both CLIPSeg and Rembg models
+# - CLIPSeg: Extract specific objects using text descriptions
+# - Rembg: Remove backgrounds automatically with various specialized models
+# - Batch processing of directories or single files
+# - Dry-run mode for testing
+# - Verbose logging
+#
+# Examples:
+# - CLIPSeg: ./batch_segment.sh -m clipseg -t "person" /path/to/images/
+# - Rembg:   ./batch_segment.sh -m rembg -r birefnet-general /path/to/images/
 
 set -e  # Exit on any error
 
 # Default values
 API_URL="http://localhost:8000"
 TARGET_OBJECT="robot arm with the white body"
+MODEL_TYPE="clipseg"  # clipseg or rembg
+REMBG_MODEL="u2net"   # only used when MODEL_TYPE=rembg
 VERBOSE=false
 DRY_RUN=false
 
@@ -16,7 +31,8 @@ DRY_RUN=false
 usage() {
     echo "Usage: $0 [OPTIONS] INPUT"
     echo ""
-    echo "Process JPG files with image segmentation and save results as PNG files"
+    echo "Process JPG files with image segmentation using CLIPSeg or Rembg models"
+    echo "and save results as PNG files"
     echo ""
     echo "INPUT can be:"
     echo "  - A single image file (jpg/jpeg)"
@@ -24,18 +40,33 @@ usage() {
     echo ""
     echo "Note: The script will save segmented results as PNG files and delete the original JPG files."
     echo "Options:"
-    echo "  -t, --target TEXT    Target object to segment (default: '$TARGET_OBJECT')"
+    echo "  -m, --model TYPE     Model type: 'clipseg' or 'rembg' (default: clipseg)"
+    echo "  -t, --target TEXT    Target object for CLIPSeg (default: '$TARGET_OBJECT')"
+    echo "  -r, --rembg-model M  Rembg model name (default: '$REMBG_MODEL')"
+    echo "                       Available: u2net, u2netp, birefnet-general, birefnet-portrait, etc."
     echo "  -u, --url URL        API server URL (default: $API_URL)"
     echo "  -v, --verbose        Enable verbose output"
     echo "  -n, --dry-run        Show what would be processed without actually doing it"
     echo "  -h, --help           Show this help message"
     echo ""
+    echo "Model Information:"
+    echo "  CLIPSeg: Text-guided segmentation - extracts specific objects described in text"
+    echo "  Rembg:   Background removal - removes background automatically (no text needed)"
+    echo ""
     echo "Examples:"
+    echo "  # CLIPSeg examples"
     echo "  $0 /path/to/image.jpg"
-    echo "  $0 /path/to/images/"
-    echo "  $0 -t 'person' -v /path/to/image.jpg"
-    echo "  $0 --target 'red car' --url http://192.168.1.100:8000 /path/to/images/"
+    echo "  $0 -m clipseg -t 'person' -v /path/to/images/"
+    echo "  $0 --model clipseg --target 'red car' /path/to/images/"
+    echo ""
+    echo "  # Rembg examples"
+    echo "  $0 -m rembg /path/to/image.jpg"
+    echo "  $0 --model rembg --rembg-model birefnet-general /path/to/images/"
+    echo "  $0 -m rembg -r birefnet-portrait /path/to/portraits/"
+    echo ""
+    echo "  # Other examples"
     echo "  $0 --dry-run /path/to/image.jpg"
+    echo "  $0 --url http://192.168.1.100:8000 -m rembg /path/to/images/"
     echo ""
 }
 
@@ -95,18 +126,36 @@ process_image() {
     log "Processing: $image_path"
     
     if [ "$DRY_RUN" = true ]; then
-        log_info "DRY RUN: Would process $image_path with target '$TARGET_OBJECT'"
+        if [ "$MODEL_TYPE" = "clipseg" ]; then
+            log_info "DRY RUN: Would process $image_path with CLIPSeg, target '$TARGET_OBJECT'"
+        else
+            log_info "DRY RUN: Would process $image_path with Rembg, model '$REMBG_MODEL'"
+        fi
         log_info "DRY RUN: Would save PNG result to $output_path and delete original JPG"
         return 0
     fi
     
+    # Prepare curl command based on model type
+    local curl_cmd=(
+        curl -s --max-time 60
+        -X POST
+        -F "image=@$image_path"
+        -F "model_type=$MODEL_TYPE"
+    )
+    
+    # Add model-specific parameters
+    if [ "$MODEL_TYPE" = "clipseg" ]; then
+        curl_cmd+=(-F "target=$TARGET_OBJECT")
+        log "Using CLIPSeg with target: '$TARGET_OBJECT'"
+    else
+        curl_cmd+=(-F "model_name=$REMBG_MODEL")
+        log "Using Rembg with model: '$REMBG_MODEL'"
+    fi
+    
+    curl_cmd+=("$API_URL/segment" -o "$temp_output")
+    
     # Make API request
-    if curl -s --max-time 60 \
-        -X POST \
-        -F "image=@$image_path" \
-        -F "target=$TARGET_OBJECT" \
-        "$API_URL/segment" \
-        -o "$temp_output"; then
+    if "${curl_cmd[@]}"; then
         
         # Check if we got a valid response (non-empty file)
         if [ -s "$temp_output" ]; then
@@ -212,8 +261,20 @@ process_input() {
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        -m|--model)
+            MODEL_TYPE="$2"
+            if [[ "$MODEL_TYPE" != "clipseg" && "$MODEL_TYPE" != "rembg" ]]; then
+                log_error "Invalid model type: $MODEL_TYPE. Use 'clipseg' or 'rembg'"
+                exit 1
+            fi
+            shift 2
+            ;;
         -t|--target)
             TARGET_OBJECT="$2"
+            shift 2
+            ;;
+        -r|--rembg-model)
+            REMBG_MODEL="$2"
             shift 2
             ;;
         -u|--url)
@@ -251,6 +312,13 @@ if [ -z "$INPUT_PATH" ]; then
     exit 1
 fi
 
+# Validate model-specific requirements
+if [ "$MODEL_TYPE" = "clipseg" ] && [ -z "$TARGET_OBJECT" ]; then
+    log_error "CLIPSeg model requires a target object description (-t/--target)"
+    log_error "Example: $0 -m clipseg -t 'person' /path/to/images/"
+    exit 1
+fi
+
 # Check if input path exists
 if [ ! -e "$INPUT_PATH" ]; then
     log_error "Input path does not exist: $INPUT_PATH"
@@ -267,7 +335,12 @@ fi
 # Display configuration
 log_info "Configuration:"
 log_info "  Input path: $INPUT_PATH"
-log_info "  Target object: $TARGET_OBJECT"
+log_info "  Model type: $MODEL_TYPE"
+if [ "$MODEL_TYPE" = "clipseg" ]; then
+    log_info "  Target object: $TARGET_OBJECT"
+else
+    log_info "  Rembg model: $REMBG_MODEL"
+fi
 log_info "  API URL: $API_URL"
 log_info "  Verbose: $VERBOSE"
 log_info "  Dry run: $DRY_RUN"

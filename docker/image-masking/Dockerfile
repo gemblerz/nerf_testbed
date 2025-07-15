@@ -39,7 +39,8 @@ RUN pip install --no-cache-dir \
     numpy>=1.21.0 \
     requests>=2.25.0 \
     scipy>=1.7.0 \
-    protobuf>=3.20.0
+    protobuf>=3.20.0 \
+    rembg[cpu]>=2.0.0
 
 # Copy the application files
 COPY image-mask-server.py .

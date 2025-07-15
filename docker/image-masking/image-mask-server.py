@@ -19,6 +19,7 @@ import torch
 from PIL import Image
 import numpy as np
 from transformers import pipeline, CLIPSegProcessor, CLIPSegForImageSegmentation
+from rembg import remove, new_session
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -27,33 +28,48 @@ logger = logging.getLogger(__name__)
 class ImageSegmentationHandler(BaseHTTPRequestHandler):
     """HTTP request handler for image segmentation"""
     
-    # Class-level variables to store the model (shared across all instances)
-    _processor = None
-    _model = None
+    # Class-level variables to store the models (shared across all instances)
+    _clipseg_processor = None
+    _clipseg_model = None
+    _rembg_session = None
     _device = "cuda" if torch.cuda.is_available() else "cpu"
-    _model_loaded = False
+    _clipseg_loaded = False
+    _rembg_loaded = False
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     
     @classmethod
-    def _load_model(cls):
-        """Load the CLIPSeg model for image segmentation (class method)"""
-        if not cls._model_loaded:
+    def _load_clipseg_model(cls):
+        """Load the CLIPSeg model for text-guided image segmentation"""
+        if not cls._clipseg_loaded:
             logger.info(f"Loading CLIPSeg model on device: {cls._device}")
             try:
-                cls._processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
-                cls._model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
-                cls._model.to(cls._device)
-                cls._model_loaded = True
-                logger.info("Model loaded successfully")
+                cls._clipseg_processor = CLIPSegProcessor.from_pretrained("CIDAS/clipseg-rd64-refined")
+                cls._clipseg_model = CLIPSegForImageSegmentation.from_pretrained("CIDAS/clipseg-rd64-refined")
+                cls._clipseg_model.to(cls._device)
+                cls._clipseg_loaded = True
+                logger.info("CLIPSeg model loaded successfully")
             except Exception as e:
-                logger.error(f"Failed to load model: {e}")
+                logger.error(f"Failed to load CLIPSeg model: {e}")
                 raise
     
-    def _segment_image(self, image: Image.Image, target_text: str) -> Image.Image:
+    @classmethod
+    def _load_rembg_model(cls):
+        """Load the Rembg model for background removal"""
+        if not cls._rembg_loaded:
+            logger.info("Loading Rembg model")
+            try:
+                cls._rembg_session = new_session()
+                cls._rembg_loaded = True
+                logger.info("Rembg model loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load Rembg model: {e}")
+                raise
+    
+    def _segment_image_clipseg(self, image: Image.Image, target_text: str) -> Image.Image:
         """
-        Segment the image to extract the target object
+        Segment the image to extract the target object using CLIPSeg
         
         Args:
             image: PIL Image to segment
@@ -64,10 +80,10 @@ class ImageSegmentationHandler(BaseHTTPRequestHandler):
         """
         try:
             # Ensure model is loaded
-            self._load_model()
+            self._load_clipseg_model()
             
             # Prepare inputs
-            inputs = self._processor(
+            inputs = self._clipseg_processor(
                 text=[target_text], 
                 images=[image], 
                 padding="max_length", 
@@ -76,7 +92,7 @@ class ImageSegmentationHandler(BaseHTTPRequestHandler):
             
             # Generate segmentation mask
             with torch.no_grad():
-                outputs = self._model(**inputs)
+                outputs = self._clipseg_model(**inputs)
                 logits = outputs.logits
                 
             # Process the logits to create a mask
@@ -115,15 +131,45 @@ class ImageSegmentationHandler(BaseHTTPRequestHandler):
             return segmented_image
             
         except Exception as e:
-            logger.error(f"Error during segmentation: {e}")
+            logger.error(f"Error during CLIPSeg segmentation: {e}")
             raise
     
-    def _parse_multipart_form(self) -> Tuple[Optional[Image.Image], Optional[str]]:
-        """Parse multipart form data to extract image and target text"""
+    def _segment_image_rembg(self, image: Image.Image, model_name: str = "u2net") -> Image.Image:
+        """
+        Remove background from image using Rembg
+        
+        Args:
+            image: PIL Image to process
+            model_name: Rembg model to use (u2net, u2netp, birefnet-general, etc.)
+            
+        Returns:
+            PIL Image with background removed
+        """
+        try:
+            # Ensure model is loaded
+            self._load_rembg_model()
+            
+            # Remove background
+            if model_name != "u2net":
+                # Create session with specific model
+                session = new_session(model_name)
+                output = remove(image, session=session)
+            else:
+                # Use default session
+                output = remove(image, session=self._rembg_session)
+            
+            return output
+            
+        except Exception as e:
+            logger.error(f"Error during Rembg background removal: {e}")
+            raise
+    
+    def _parse_multipart_form(self) -> Tuple[Optional[Image.Image], Optional[str], Optional[str], Optional[str]]:
+        """Parse multipart form data to extract image, target text, model type, and model name"""
         try:
             content_type = self.headers.get('Content-Type', '')
             if not content_type.startswith('multipart/form-data'):
-                return None, None
+                return None, None, None, None
             
             # Parse multipart form data
             form = cgi.FieldStorage(
@@ -137,6 +183,8 @@ class ImageSegmentationHandler(BaseHTTPRequestHandler):
             
             image = None
             target_text = None
+            model_type = "clipseg"  # default
+            model_name = "u2net"   # default for rembg
             
             # Extract image file
             if 'image' in form:
@@ -145,31 +193,50 @@ class ImageSegmentationHandler(BaseHTTPRequestHandler):
                     image_data = image_field.file.read()
                     image = Image.open(io.BytesIO(image_data))
             
-            # Extract target text
+            # Extract target text (required for CLIPSeg)
             if 'target' in form:
                 target_text = form['target'].value
             
-            return image, target_text
+            # Extract model type (clipseg or rembg)
+            if 'model_type' in form:
+                model_type = form['model_type'].value.lower()
+            
+            # Extract model name (for rembg models)
+            if 'model_name' in form:
+                model_name = form['model_name'].value
+            
+            return image, target_text, model_type, model_name
             
         except Exception as e:
             logger.error(f"Error parsing form data: {e}")
-            return None, None
+            return None, None, None, None
     
     def do_POST(self):
         """Handle POST requests for image segmentation"""
         try:
             if self.path == '/segment':
                 # Parse form data
-                image, target_text = self._parse_multipart_form()
+                image, target_text, model_type, model_name = self._parse_multipart_form()
                 
-                if image is None or target_text is None:
-                    self.send_error(400, "Missing required fields: 'image' and 'target'")
+                if image is None:
+                    self.send_error(400, "Missing required field: 'image'")
                     return
                 
-                logger.info(f"Processing segmentation request for target: '{target_text}'")
-                
-                # Perform segmentation
-                segmented_image = self._segment_image(image, target_text)
+                # Validate model type and required parameters
+                if model_type == "clipseg":
+                    if target_text is None:
+                        self.send_error(400, "CLIPSeg requires 'target' text description")
+                        return
+                    logger.info(f"Processing CLIPSeg segmentation for target: '{target_text}'")
+                    segmented_image = self._segment_image_clipseg(image, target_text)
+                    
+                elif model_type == "rembg":
+                    logger.info(f"Processing Rembg background removal with model: '{model_name}'")
+                    segmented_image = self._segment_image_rembg(image, model_name)
+                    
+                else:
+                    self.send_error(400, f"Invalid model_type: '{model_type}'. Use 'clipseg' or 'rembg'")
+                    return
                 
                 # Convert image to bytes
                 img_buffer = io.BytesIO()
@@ -196,25 +263,40 @@ class ImageSegmentationHandler(BaseHTTPRequestHandler):
         """Handle GET requests - provide API information"""
         if self.path == '/':
             response = {
-                "message": "Image Segmentation API using CLIPSeg",
-                "model": "CIDAS/clipseg-rd64-refined",
+                "message": "Image Segmentation API with CLIPSeg and Rembg",
+                "models": {
+                    "clipseg": "CIDAS/clipseg-rd64-refined",
+                    "rembg": "Multiple models available (u2net, birefnet-general, etc.)"
+                },
                 "endpoints": {
                     "POST /segment": {
-                        "description": "Segment an image to extract target object",
+                        "description": "Segment an image using CLIPSeg or remove background using Rembg",
                         "parameters": {
-                            "image": "Image file (multipart/form-data)",
-                            "target": "Text description of target object to segment"
+                            "image": "Image file (multipart/form-data) - REQUIRED",
+                            "model_type": "Model type: 'clipseg' or 'rembg' (default: clipseg)",
+                            "target": "Text description of target object (REQUIRED for CLIPSeg)",
+                            "model_name": "Rembg model name (default: u2net, options: u2netp, birefnet-general, birefnet-portrait, isnet-general-use, etc.)"
                         },
-                        "response": "PNG image with segmented object"
+                        "response": "PNG image with segmented object or background removed"
                     }
                 },
-                "features": [
-                    "Zero-shot segmentation with arbitrary text descriptions",
-                    "No predefined classes - works with any object description",
-                    "Supports custom labels and specific object descriptions",
-                    "Examples: 'red car', 'person wearing hat', 'wooden table', 'blue sky'"
-                ],
-                "usage": "curl -X POST -F 'image=@image.jpg' -F 'target=red car' http://localhost:8000/segment -o result.png"
+                "model_comparison": {
+                    "clipseg": {
+                        "use_case": "Text-guided segmentation for specific objects",
+                        "requires": "Text description of target object",
+                        "examples": "'red car', 'person wearing hat', 'wooden table'"
+                    },
+                    "rembg": {
+                        "use_case": "General background removal",
+                        "requires": "No text input needed",
+                        "models": ["u2net", "u2netp", "birefnet-general", "birefnet-portrait", "isnet-general-use", "isnet-anime"]
+                    }
+                },
+                "usage_examples": {
+                    "clipseg": "curl -X POST -F 'image=@image.jpg' -F 'model_type=clipseg' -F 'target=red car' http://localhost:8000/segment -o result.png",
+                    "rembg_default": "curl -X POST -F 'image=@image.jpg' -F 'model_type=rembg' http://localhost:8000/segment -o result.png",
+                    "rembg_custom_model": "curl -X POST -F 'image=@image.jpg' -F 'model_type=rembg' -F 'model_name=birefnet-general' http://localhost:8000/segment -o result.png"
+                }
             }
             
             self.send_response(200)
@@ -233,16 +315,20 @@ def run_server(host='0.0.0.0', port=8000):
     """Run the HTTP server"""
     logger.info(f"Starting Image Segmentation Server on {host}:{port}")
     
-    # Load the model once at startup
-    logger.info("Loading model at startup...")
-    ImageSegmentationHandler._load_model()
+    # Load the CLIPSeg model once at startup
+    logger.info("Loading CLIPSeg model at startup...")
+    ImageSegmentationHandler._load_clipseg_model()
+    
+    # Rembg models are loaded on-demand for better memory efficiency
+    logger.info("Rembg models will be loaded on-demand")
     
     server_address = (host, port)
     httpd = HTTPServer(server_address, ImageSegmentationHandler)
     
     try:
         logger.info(f"Server running at http://{host}:{port}")
-        logger.info("Send POST requests to /segment with 'image' file and 'target' text")
+        logger.info("Send POST requests to /segment with 'image' file and 'model_type' (clipseg/rembg)")
+        logger.info("For CLIPSeg: include 'target' text. For Rembg: optionally include 'model_name'")
         httpd.serve_forever()
     except KeyboardInterrupt:
         logger.info("Server stopped by user")

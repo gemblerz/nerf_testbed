@@ -1,14 +1,22 @@
 # Image Segmentation HTTP Server
 
-A simple HTTP server that performs image segmentation using Hugging Face's CLIPSeg model. Send an image and target object description, get back a segmented image containing only the target object.
+A powerful HTTP server that provides image segmentation and background removal using both CLIPSeg and Rembg models. Choose between text-guided segmentation or automatic background removal.
 
 ## Features
 
-- REST API for image segmentation
-- Uses CLIPSeg model for zero-shot segmentation
-- Supports GPU acceleration (falls back to CPU)
-- Returns PNG images with transparency
-- Simple multipart/form-data interface
+- **Dual Model Support**: CLIPSeg for text-guided segmentation + Rembg for background removal
+- **REST API**: Simple multipart/form-data interface
+- **GPU Acceleration**: Supports CUDA (falls back to CPU)
+- **Multiple Models**: Various Rembg models (u2net, birefnet-general, etc.)
+- **Flexible Output**: PNG images with transparency
+- **Zero-shot**: CLIPSeg works with any text description
+
+## Model Comparison
+
+| Model | Use Case | Input Required | Best For |
+|-------|----------|----------------|----------|
+| **CLIPSeg** | Text-guided segmentation | Image + text description | Specific object extraction |
+| **Rembg** | Background removal | Image only | General background removal |
 
 ## Quick Start
 
@@ -24,9 +32,13 @@ docker build -t image-segmentation-server .
 docker run -p 8000:8000 image-segmentation-server
 ```
 
-3. Test the API:
+3. Test the APIs:
 ```bash
-curl -X POST -F 'image=@your_image.jpg' -F 'target=person' http://localhost:8000/segment -o result.png
+# CLIPSeg: Extract specific objects
+curl -X POST -F 'image=@photo.jpg' -F 'model_type=clipseg' -F 'target=person' http://localhost:8000/segment -o clipseg_result.png
+
+# Rembg: Remove background
+curl -X POST -F 'image=@photo.jpg' -F 'model_type=rembg' http://localhost:8000/segment -o rembg_result.png
 ```
 
 ### Local Development
@@ -45,60 +57,105 @@ python image-mask-server.py
 
 ### POST /segment
 
-Segment an image to extract a target object.
+Segment an image using either CLIPSeg or Rembg.
 
 **Parameters:**
-- `image`: Image file (multipart/form-data)
-- `target`: Text description of the target object to segment
+- `image`: Image file (multipart/form-data) - **REQUIRED**
+- `model_type`: Model to use - `"clipseg"` or `"rembg"` (default: clipseg)
+- `target`: Text description of target object - **REQUIRED for CLIPSeg**
+- `model_name`: Rembg model name (default: u2net) - **Optional for Rembg**
 
 **Response:**
-- PNG image with the segmented object (transparent background)
+- PNG image with segmented object or background removed
 
-**Example:**
+### CLIPSeg Examples:
 ```bash
+# Extract a person from photo
 curl -X POST \
   -F 'image=@photo.jpg' \
-  -F 'target=dog' \
+  -F 'model_type=clipseg' \
+  -F 'target=person' \
   http://localhost:8000/segment \
-  -o segmented_dog.png
+  -o person.png
+
+# Extract a specific object
+curl -X POST \
+  -F 'image=@street.jpg' \
+  -F 'model_type=clipseg' \
+  -F 'target=red car' \
+  http://localhost:8000/segment \
+  -o red_car.png
+```
+
+### Rembg Examples:
+```bash
+# Remove background with default model
+curl -X POST \
+  -F 'image=@photo.jpg' \
+  -F 'model_type=rembg' \
+  http://localhost:8000/segment \
+  -o no_background.png
+
+# Use specific Rembg model
+curl -X POST \
+  -F 'image=@portrait.jpg' \
+  -F 'model_type=rembg' \
+  -F 'model_name=birefnet-portrait' \
+  http://localhost:8000/segment \
+  -o portrait_no_bg.png
 ```
 
 ### GET /
 
-Get API information and usage instructions.
+Get API information, available models, and usage instructions.
 
 ## Test Client
 
-Use the provided test client:
+Use the enhanced test client to test both models:
 
 ```bash
-python test_client.py path/to/image.jpg "target object"
+# Test both models
+python test_client.py photo.jpg --target "person" --model-type both
+
+# Test only CLIPSeg
+python test_client.py photo.jpg --target "car" --model-type clipseg
+
+# Test only Rembg
+python test_client.py photo.jpg --model-type rembg --rembg-model birefnet-general
+
+# Show API information
+python test_client.py photo.jpg --info
 ```
 
-Examples:
-```bash
-python test_client.py photo.jpg "person"
-python test_client.py street.jpg "car"
-python test_client.py garden.jpg "flower"
-```
+## Available Models
 
-## Supported Target Objects
+### CLIPSeg
+- **Model**: `CIDAS/clipseg-rd64-refined`
+- **Use Case**: Text-guided object segmentation
+- **Strengths**: Works with any text description, precise object targeting
 
-The CLIPSeg model can segment a wide variety of objects described in natural language:
-- People: "person", "man", "woman", "child"
-- Animals: "dog", "cat", "bird", "horse"
-- Vehicles: "car", "truck", "bicycle", "motorcycle"
-- Objects: "chair", "table", "phone", "laptop"
-- Nature: "tree", "flower", "grass", "sky"
-- And many more!
+### Rembg Models
+- **u2net**: General purpose background removal (default)
+- **u2netp**: Lightweight version of u2net
+- **birefnet-general**: High-quality general background removal
+- **birefnet-portrait**: Optimized for human portraits
+- **isnet-general-use**: Advanced general segmentation
+- **isnet-anime**: Specialized for anime characters
+- **And more**: See full list at [rembg models](https://github.com/danielgatis/rembg#models)
 
-## Model Information
+## When to Use Each Model
 
-This server uses the CLIPSeg model (`CIDAS/clipseg-rd64-refined`) which:
-- Performs zero-shot image segmentation
-- Accepts natural language descriptions
-- Works with arbitrary object categories
-- Provides good quality segmentation masks
+### Use CLIPSeg when:
+- You want to extract specific objects (e.g., "red car", "person wearing hat")
+- You need precise control over what gets segmented
+- You want to segment multiple different objects from the same image
+- You need to target objects by description rather than category
+
+### Use Rembg when:
+- You want to remove the entire background
+- You need high-quality general background removal
+- Speed is important (no text processing needed)
+- You're working with portraits, products, or general photography
 
 ## Environment Variables
 
@@ -106,22 +163,13 @@ This server uses the CLIPSeg model (`CIDAS/clipseg-rd64-refined`) which:
 - `PORT`: Server port (default: 8000)
 - `HF_HOME`: Hugging Face cache directory
 
-## Docker Build Arguments
-
-- `TORCH_VERSION`: PyTorch version (default: cu118)
-- `TORCH_INDEX_URL`: PyTorch index URL (default: CUDA 11.8)
-
-For CPU-only builds:
-```bash
-docker build --build-arg TORCH_VERSION=cpu --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu -t image-segmentation-server .
-```
-
 ## Requirements
 
 - Python 3.10+
 - PyTorch 2.0+
 - Transformers 4.30+
 - PIL/Pillow
+- rembg 2.0+
 - NumPy
 
 ## Notes
