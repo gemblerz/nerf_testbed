@@ -49,6 +49,8 @@ docker compose -f docker-compose-monitor.yml up -d
 
 ## Running a Sender
 
+> NOTE: [The camera system requirement from Nvidia VSLAM](https://nvidia-isaac-ros.github.io/repositories_and_packages/isaac_ros_visual_slam/index.html#camera-system-requirements) demonds 30 FPS at minimum. We may need to set the FPS to 30 from the camera and lower the resolution the process has a bottleneck.
+
 ```bash
 docker run -ti --rm \
   --name vslam-rtx \
@@ -58,8 +60,8 @@ docker run -ti --rm \
   gemblerz/ros-isaac-realsense2:3.2.0-humble-amd64-cuda \
   /app/launch.sh \
     camera_node_name:=camera \
-    camera_rgb_profile:=848x480x15 \
-    camera_depth_profile:=848x480x15 \
+    camera_rgb_profile:=848x480x30 \
+    camera_depth_profile:=640x480x30 \
     image_jitter_threshold:=80.0 \
     enable_image_denoise:=False \
     enable_align_depth:=True

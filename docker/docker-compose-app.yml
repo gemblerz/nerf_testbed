@@ -1,0 +1,26 @@
+version: "3.9"
+services:
+  realsense-vslam:
+    image: gemblerz/ros-isaac-realsense2:3.2.0-humble-amd64-cuda
+    container_name: realsense-vslam
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    privileged: true
+    network_mode: host
+    runtime: nvidia
+    command:
+      - /app/launch.sh
+      - camera_node_name:=camera
+      - camera_rgb_profile:=848x480x30
+      - camera_depth_profile:=640x480x30
+      - image_jitter_threshold:=80.0
+      - enable_image_denoise:=False
+      - enable_align_depth:=True
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
