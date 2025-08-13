@@ -1,7 +1,10 @@
 # https://catalog.ngc.nvidia.com/orgs/nvidia/teams/isaac/containers/ros/tags
 # This no longer exists. Why?!
 # FROM nvcr.io/nvidia/isaac/ros:x86_64-ros2_humble_b0d3ce146e1d446847f5ab373398eff7
-FROM nvcr.io/nvidia/isaac/ros:x86_64-ros2_humble_79152baed139e9f4258734f3056c263a
+
+# This no longer exists as of 03/13/2025.
+# FROM nvcr.io/nvidia/isaac/ros:x86_64-ros2_humble_79152baed139e9f4258734f3056c263a
+FROM nvcr.io/nvidia/isaac/ros:x86_64-ros2_humble_6f2a6bddf70fcd928f08e874635efe43
 
 # The image fails with
 # #9 3.452 W: GPG error: https://apt.kitware.com/ubuntu focal InRelease: The following signatures couldn't be verified because the public key is not available: NO_PUBKEY 16FAAD7AF99A65E2
