@@ -1,0 +1,233 @@
+ARG NVIDIA_L4T_CUDA=nvcr.io/nvidia/l4t-cuda:12.2.2-devel-arm64-ubuntu22.04
+
+# CUDA architectures, required by Colmap and tiny-cuda-nn. Use >= 8.0 for faster TCNN.
+# ARG CUDA_ARCHITECTURES="90;89;86;80;75;70;61"
+# CUDA architecture 75 is for 20X0 GPUs.
+# CUDA architecture 87 is for Jetson Orin.
+ARG CUDA_ARCHITECTURES="87"
+ARG NERFSTUDIO_VERSION="v1.1.5"
+
+# Pull source either provided or from git.
+FROM scratch as source_copy
+ONBUILD COPY . /tmp/nerfstudio
+FROM alpine/git as source_no_copy
+ARG NERFSTUDIO_VERSION
+# RUN apt-get update && \
+#     apt-get install -y --no-install-recommends --no-install-suggests \
+#     git
+
+ONBUILD RUN git clone --branch ${NERFSTUDIO_VERSION} --recursive https://github.com/nerfstudio-project/nerfstudio.git /tmp/nerfstudio
+ARG NERFSTUDIO_VERSION
+FROM source_${NERFSTUDIO_VERSION:+no_}copy as source
+
+
+FROM ${NVIDIA_L4T_CUDA} as builder
+ARG CUDA_ARCHITECTURES
+ARG NVIDIA_CUDA_VERSION
+ARG UBUNTU_VERSION
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV QT_XCB_GL_INTEGRATION=xcb_egl
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --no-install-suggests \
+        git \
+        wget \
+        ninja-build \
+        build-essential \
+        libboost-program-options-dev \
+        libboost-filesystem-dev \
+        libboost-graph-dev \
+        libboost-system-dev \
+        libeigen3-dev \
+        libflann-dev \
+        libfreeimage-dev \
+        libmetis-dev \
+        libgoogle-glog-dev \
+        libgtest-dev \
+        libsqlite3-dev \
+        libglew-dev \
+        qtbase5-dev \
+        libqt5opengl5-dev \
+        libcgal-dev \
+        libsuitesparse-dev \
+        libblas-dev \
+        liblapack-dev \
+        libcudnn9-dev-cuda-12 \
+        libopenblas-dev \
+        libjpeg-dev \
+        libpng-dev \
+        libtiff-dev \
+        python3.10-dev \
+        python3-pip
+
+# Build and install CMake
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.31.3/cmake-3.31.3-linux-aarch64.sh \
+    -q -O /tmp/cmake-install.sh \
+    && chmod u+x /tmp/cmake-install.sh \
+    && mkdir -p /opt/cmake-3.31.3 \
+    && /tmp/cmake-install.sh --skip-license --prefix=/opt/cmake-3.31.3 \
+    && rm /tmp/cmake-install.sh \
+    && ln -s /opt/cmake-3.31.3/bin/* /usr/local/bin
+    
+# Build and install Ceres Solver with CUDA support
+RUN git clone https://github.com/ceres-solver/ceres-solver.git && \
+    cd ceres-solver && \
+    git checkout "2.2.0" && \
+    mkdir build && \
+    cd build && \
+    cmake .. -GNinja \
+        -DCMAKE_INSTALL_PREFIX=/build/ceres \
+        -DBUILD_TESTING=OFF \
+        -DBUILD_EXAMPLES=OFF \
+        -DBUILD_SHARED_LIBS=ON \
+        -DUSE_CUDA=ON \
+        -DCUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda \
+        "-DCMAKE_CUDA_ARCHITECTURES=native" && \
+    ninja install -j$(($(nproc) - 1)) && \
+    cd ~
+
+# Set environment variables for finding the custom-built Ceres
+ENV CMAKE_PREFIX_PATH="/build/ceres:$CMAKE_PREFIX_PATH"
+ENV PKG_CONFIG_PATH="/build/ceres/lib/pkgconfig:$PKG_CONFIG_PATH"
+ENV LD_LIBRARY_PATH="/build/ceres/lib:$LD_LIBRARY_PATH"
+RUN git clone https://github.com/cvg/pyceres.git && \
+    cd pyceres && \
+    python3.10 -m pip install --no-cache-dir . && \
+    cd ~
+
+    # Build and install GLOMAP.
+# For ARM, we force native architecture detection.
+# (See https://colmap.github.io/install.html)
+RUN git clone https://github.com/colmap/glomap.git && \
+    cd glomap && \
+    git checkout "1.0.0" && \
+    mkdir build && \
+    cd build && \
+    mkdir -p /build && \
+    cmake .. -GNinja "-DCMAKE_CUDA_ARCHITECTURES=native" \
+        -DCMAKE_INSTALL_PREFIX=/build/glomap && \
+    ninja install -j$(($(nproc) - 1)) && \
+    cd ~
+
+# Build and install COLMAP.
+# For 3.11.1 version pycolmap is 
+# export CMAKE_PREFIX_PATH=/build/colmap
+RUN git clone https://github.com/colmap/colmap.git && \
+    cd colmap && \
+    git checkout "3.11.1" && \
+    mkdir build && \
+    cd build && \
+    mkdir -p /build && \
+    cmake .. -GNinja "-DCMAKE_CUDA_ARCHITECTURES=native" \
+        -DCMAKE_INSTALL_PREFIX=/build/colmap && \
+    ninja install -j$(($(nproc) - 1)) && \
+    cd ~
+
+# Build pycolmap separately with explicit library paths
+RUN pip install --no-cache-dir ruff && \
+    cd colmap/pycolmap && \
+    CMAKE_PREFIX_PATH="/build/ceres:/build/colmap:$CMAKE_PREFIX_PATH" \
+    LD_LIBRARY_PATH="/build/ceres/lib:/build/colmap/lib:$LD_LIBRARY_PATH" \
+    python3.10 -m pip install --no-cache-dir . && \
+    cd ~
+
+# Install PyTorch from Nvidia wheels.
+# Note: for Jetson, we use the PyTorch wheels provided by NVIDIA.
+Add https://developer.download.nvidia.com/compute/redist/jp/v61/pytorch/torch-2.5.0a0+872d972e41.nv24.08.17622132-cp310-cp310-linux_aarch64.whl /tmp/
+RUN pip install --no-cache-dir --upgrade pip 'setuptools<70.0.0' && \
+    pip install --no-cache-dir /tmp/torch*.whl numpy
+
+# Compile Torchvision from source as it is not provided by Nvidia.
+# https://github.com/azimjaan21/jetpack-6.1-pytorch-torchvision-
+RUN git clone https://github.com/pytorch/vision.git && \
+    cd vision && \
+    git checkout v0.20.0 && \
+    python3.10 -m pip install --no-cache-dir . && \
+    cd ~
+
+# Upgrade pip and install dependencies.
+# Note: We set TCNN_CUDA_ARCHITECTURES as 87 for Jetson Orin.
+RUN git clone --branch master --recursive https://github.com/cvg/Hierarchical-Localization.git /opt/hloc && \
+    cd /opt/hloc && git checkout v1.4 && python3.10 -m pip install --no-cache-dir . && cd ~ && \
+    TCNN_CUDA_ARCHITECTURES="87" pip install --no-cache-dir "git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch" && \
+    pip install --no-cache-dir omegaconf
+
+# Install gsplat and nerfstudio.
+# NOTE: both are installed jointly in order to prevent docker cache with latest
+# gsplat version (we do not expliticly specify the commit hash).
+#
+# We set MAX_JOBS to reduce resource usage for GH actions:
+# - https://github.com/nerfstudio-project/gsplat/blob/db444b904976d6e01e79b736dd89a1070b0ee1d0/setup.py#L13-L23
+COPY --from=source /tmp/nerfstudio/ /tmp/nerfstudio
+RUN export TORCH_CUDA_ARCH_LIST="$(echo "$CUDA_ARCHITECTURES" | tr ';' '\n' | awk '$0 > 70 {print substr($0,1,1)"."substr($0,2)}' | tr '\n' ' ' | sed 's/ $//')" && \
+    export MAX_JOBS=$(($(nproc) - 1)) && \
+    GSPLAT_VERSION="$(sed -n 's/.*gsplat[=>]=\s*\([^," '"'"']*\).*/\1/p' /tmp/nerfstudio/pyproject.toml)" && \
+    pip install --no-cache-dir git+https://github.com/nerfstudio-project/gsplat.git@v${GSPLAT_VERSION} && \
+    pip install --no-cache-dir /tmp/nerfstudio 'numpy<2.0.0' && \
+    rm -rf /tmp/nerfstudio
+
+# Fix permissions
+RUN chmod -R go=u /usr/local/lib/python3.10 && \
+    chmod -R go=u /build
+
+#
+# Docker runtime stage.
+#
+ARG NVIDIA_L4T_CUDA=nvcr.io/nvidia/l4t-cuda:12.2.2-devel-arm64-ubuntu22.04
+FROM ${NVIDIA_L4T_CUDA} as runtime
+ARG CUDA_ARCHITECTURES
+ARG NVIDIA_CUDA_VERSION
+ARG UBUNTU_VERSION
+
+LABEL org.opencontainers.image.source = "https://github.com/nerfstudio-project/nerfstudio"
+LABEL org.opencontainers.image.licenses = "Apache License 2.0"
+LABEL org.opencontainers.image.base.name="docker.io/library/nvidia/cuda:${NVIDIA_CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
+LABEL org.opencontainers.image.documentation = "https://docs.nerf.studio/"
+
+# Minimal dependencies to run COLMAP binary compiled in the builder stage.
+# Note: this reduces the size of the final image considerably, since all the
+# build dependencies are not needed.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends --no-install-suggests \
+        libboost-filesystem1.74.0 \
+        libboost-program-options1.74.0 \
+        libc6 \
+        libfreeimage3 \
+        libgcc-s1 \
+        libgl1 \
+        libglew2.2 \
+        libgoogle-glog0v5 \
+        libqt5core5a \
+        libqt5gui5 \
+        libqt5widgets5 \
+        libjpeg-dev \
+        libpng-dev \
+        libtiff-dev \
+        python3.10 \
+        python3.10-dev \
+        build-essential \
+        python-is-python3 \
+        ffmpeg \
+        libopenmpi3 \
+        libcudnn9-dev-cuda-12 \
+        libopenblas-dev \
+        python3-pip
+
+# Copy packages from builder stage.
+COPY --from=builder /build/ceres/ /usr/local/
+COPY --from=builder /build/colmap/ /usr/local/
+COPY --from=builder /build/glomap/ /usr/local/
+COPY --from=builder /usr/local/lib/python3.10/dist-packages/ /usr/local/lib/python3.10/dist-packages/
+COPY --from=builder /usr/local/bin/ns* /usr/local/bin/
+
+# Set runtime library path
+ENV LD_LIBRARY_PATH="/usr/local/lib:$LD_LIBRARY_PATH"
+
+RUN pip install --no-cache-dir --upgrade pip 'setuptools<70.0.0' && \
+  pip install --no-cache-dir pymeshlab
+
+# Install nerfstudio cli auto completion
+RUN /bin/bash -c 'ns-install-cli --mode install'
+
+# Bash as default entrypoint.
+CMD /bin/bash -l
